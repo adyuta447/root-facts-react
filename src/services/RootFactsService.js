@@ -2,8 +2,8 @@ import { pipeline } from '@huggingface/transformers';
 import { TONE_CONFIG } from '../utils/config.js';
 import { isWebGPUSupported, logError } from '../utils/common.js';
 
-const MODEL_ID = 'HuggingFaceTB/SmolLM2-135M-Instruct';
-const GENERATION_TIMEOUT_MS = 20000;
+const MODEL_ID = 'Xenova/LaMini-Flan-T5-77M';
+const GENERATION_TIMEOUT_MS = 30000;
 
 const VEGETABLE_NAMES_ID = {
   Beetroot: 'bit merah',
@@ -47,37 +47,19 @@ const FALLBACK_FACTS = {
   Spinach: 'Bayam kaya akan vitamin K, zat besi, dan antioksidan yang mendukung kesehatan tulang dan darah. Satu mangkuk bayam memenuhi lebih dari 1.000% kebutuhan vitamin K harian yang penting untuk proses pembekuan darah.',
 };
 
-function buildMessages(vegetableName, nameId, tone) {
+function buildPrompt(vegetableName, nameId, tone) {
   const toneStyle = {
-    normal: 'informatif dan menarik',
-    funny: 'lucu dan menghibur dengan sentuhan humor ringan',
-    professional: 'ilmiah dan akurat seperti seorang ahli botani',
-    casual: 'santai dan ramah seperti teman yang berbagi cerita',
-  }[tone] || 'informatif dan menarik';
+    normal: 'informative and interesting',
+    funny: 'funny and entertaining with light humor',
+    professional: 'scientific and accurate like a botanist',
+    casual: 'casual and friendly',
+  }[tone] || 'informative and interesting';
 
-  return [
-    {
-      role: 'system',
-      content: `Kamu adalah asisten yang memberikan fakta menarik tentang sayuran dalam bahasa Indonesia. Selalu berikan fakta yang spesifik dan relevan hanya tentang sayuran yang diminta. Jangan membahas sayuran lain.`,
-    },
-    {
-      role: 'user',
-      content: `Berikan satu fakta menarik tentang ${vegetableName} (nama Indonesia: ${nameId}) dalam bahasa Indonesia. Gaya: ${toneStyle}. Fakta harus spesifik tentang ${vegetableName} dan terdiri dari 2-3 kalimat. Mulai langsung dengan faktanya tanpa awalan seperti "Tentu" atau "Berikut".`,
-    },
-  ];
+  return `Provide one interesting fact about ${vegetableName} (Indonesian name: "${nameId}") in a ${toneStyle} style. Write 2-3 sentences in Indonesian language (Bahasa Indonesia). Be specific about ${vegetableName} only.`;
 }
 
-function buildRetryMessages(vegetableName, nameId) {
-  return [
-    {
-      role: 'system',
-      content: `Jawab HANYA tentang ${vegetableName} (${nameId}). Dilarang membahas sayuran lain.`,
-    },
-    {
-      role: 'user',
-      content: `Fakta menarik tentang ${vegetableName} dalam 2 kalimat bahasa Indonesia:`,
-    },
-  ];
+function buildRetryPrompt(vegetableName, nameId) {
+  return `Give one interesting fact about ${vegetableName} (${nameId}) in 2 sentences using Indonesian language.`;
 }
 
 function isRelevant(text, vegetableName, nameId) {
@@ -97,15 +79,20 @@ export class RootFactsService {
     this.currentTone = TONE_CONFIG.defaultTone;
   }
 
-  async loadModel() {
+  async loadModel(onProgress) {
     const deviceOptions = isWebGPUSupported() ? ['webgpu', 'wasm'] : ['wasm'];
 
     let lastError;
     for (const device of deviceOptions) {
       try {
-        this.generator = await pipeline('text-generation', MODEL_ID, {
-          dtype: 'q4',
+        this.generator = await pipeline('text2text-generation', MODEL_ID, {
+          dtype: 'q8',
           device,
+          progress_callback: (info) => {
+            if (onProgress && info.progress !== undefined) {
+              onProgress(Math.round(info.progress));
+            }
+          },
         });
         this.isModelLoaded = true;
         return true;
@@ -136,7 +123,7 @@ export class RootFactsService {
     try {
       // First attempt
       let result = await this._generateWithTimeout(
-        buildMessages(vegetableName, nameId, this.currentTone),
+        buildPrompt(vegetableName, nameId, this.currentTone),
       );
 
       if (isRelevant(result, vegetableName, nameId)) {
@@ -145,7 +132,7 @@ export class RootFactsService {
 
       // Retry with stricter prompt
       result = await this._generateWithTimeout(
-        buildRetryMessages(vegetableName, nameId),
+        buildRetryPrompt(vegetableName, nameId),
       );
 
       if (isRelevant(result, vegetableName, nameId)) {
@@ -162,26 +149,17 @@ export class RootFactsService {
     }
   }
 
-  async _generateWithTimeout(messages) {
+  async _generateWithTimeout(prompt) {
     const timeout = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('generation timeout')), GENERATION_TIMEOUT_MS),
     );
 
-    const generation = this.generator(messages, {
+    const generation = this.generator(prompt, {
       max_new_tokens: 150,
-      temperature: 0.7,
-      top_p: 0.9,
-      do_sample: true,
-      return_full_text: false,
     });
 
     const output = await Promise.race([generation, timeout]);
-    const generated = output[0]?.generated_text;
-
-    if (Array.isArray(generated)) {
-      return generated.at(-1)?.content?.trim() || '';
-    }
-    return String(generated || '').trim();
+    return String(output[0]?.generated_text || '').trim();
   }
 
   isReady() {

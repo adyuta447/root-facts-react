@@ -46,16 +46,22 @@ function App() {
 
         if (cancelled) return;
 
-        if (detector.isLoaded()) {
-          actions.setModelStatus('Model AI Siap');
-        } else {
+        if (!detector.isLoaded()) {
           actions.setModelStatus('Gagal Memuat Model');
           return;
         }
 
-        generator.loadModel().catch((err) => {
+        if (!cancelled) actions.setModelStatus('Memuat Model AI...');
+
+        try {
+          await generator.loadModel((progress) => {
+            if (!cancelled) actions.setModelStatus(`Memuat Model AI... ${progress}%`);
+          });
+          if (!cancelled) actions.setModelStatus('Model AI Siap');
+        } catch (err) {
           console.warn('LLM gagal dimuat, fun fact tidak tersedia:', err);
-        });
+          if (!cancelled) actions.setModelStatus('Model Deteksi Siap');
+        }
       } catch (error) {
         if (!cancelled) {
           actions.setError(`Gagal memuat model deteksi: ${  error.message}`);
