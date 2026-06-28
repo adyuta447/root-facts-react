@@ -42,6 +42,7 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         additionalManifestEntries: [
+          { url: '/manifest.json', revision: null },
           { url: '/model/model.json', revision: null },
           { url: '/model/metadata.json', revision: null },
           { url: '/model/weights.bin', revision: null },
