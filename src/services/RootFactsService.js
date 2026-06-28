@@ -86,7 +86,7 @@ export class RootFactsService {
     for (const device of deviceOptions) {
       try {
         this.generator = await pipeline('text2text-generation', MODEL_ID, {
-          dtype: 'q8',
+          dtype: 'q4',
           device,
           progress_callback: (info) => {
             if (onProgress && info.progress !== undefined) {
