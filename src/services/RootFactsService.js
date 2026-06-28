@@ -3,7 +3,7 @@ import { TONE_CONFIG } from '../utils/config.js';
 import { isWebGPUSupported, logError } from '../utils/common.js';
 
 const MODEL_ID = 'Xenova/LaMini-Flan-T5-77M';
-const GENERATION_TIMEOUT_MS = 30000;
+const GENERATION_TIMEOUT_MS = 90000;
 
 const VEGETABLE_NAMES_ID = {
   Beetroot: 'bit merah',
@@ -86,7 +86,6 @@ export class RootFactsService {
     for (const device of deviceOptions) {
       try {
         this.generator = await pipeline('text2text-generation', MODEL_ID, {
-          dtype: 'q4',
           device,
           progress_callback: (info) => {
             if (onProgress && info.progress !== undefined) {
@@ -94,6 +93,10 @@ export class RootFactsService {
             }
           },
         });
+
+        // Warmup: trigger WASM JIT compilation so first real inference is fast
+        await this.generator('warmup', { max_new_tokens: 5 }).catch(() => {});
+
         this.isModelLoaded = true;
         return true;
       } catch (error) {
@@ -155,7 +158,8 @@ export class RootFactsService {
     );
 
     const generation = this.generator(prompt, {
-      max_new_tokens: 150,
+      max_new_tokens: 100,
+      num_beams: 1,
     });
 
     const output = await Promise.race([generation, timeout]);
